@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagram Generator</title>
+    <link href="/static/style.css" rel="stylesheet">
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+</head>
+<body>
+    <div class="container" x-data="diagramApp()">
+        <header>
+            <h1>🎨 Diagram Generator</h1>
+            <p>Convert natural language descriptions into cloud architecture diagrams</p>
+        </header>
+
+        <main>
+            <!-- Input Section -->
+            <section class="input-section">
+                <form @submit.prevent="generateDiagram">
+                    <div class="form-group">
+                        <label for="description">Architecture Description:</label>
+                        <textarea 
+                            id="description" 
+                            x-model="description" 
+                            placeholder="Describe your architecture (e.g., 'Create a web application with load balancer, web servers, and database')"
+                            rows="4"
+                            required
+                        ></textarea>
+                    </div>
+                      <div class="form-row">                        <div class="form-group">
+                            <label for="model">LLM Model:</label>
+                            <select id="model" x-model="model">
+                                <option value="deepseek-coder:6.7b" selected>DeepSeek Coder 6.7B</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="filename">Custom Filename (optional):</label>
+                            <input type="text" id="filename" x-model="filename" placeholder="my-diagram">
+                        </div>
+                    </div>
+                      <div class="form-row">
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" x-model="showDebug"> Show Debug Information
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" :disabled="loading" class="generate-btn">
+                        <span x-show="!loading">🚀 Generate Diagram</span>
+                        <span x-show="loading">⏳ Generating...</span>
+                    </button>
+                </form>
+            </section>
+
+            <!-- Results Section -->
+            <section class="results-section" x-show="result || error">                <!-- Error Display -->
+                <div x-show="error" class="error-message">
+                    <h3>❌ Error</h3>
+                    <p x-text="error"></p>
+                    
+                    <!-- Debug Information for Errors -->
+                    <div x-show="showDebug && debugInfo" class="debug-section error-debug">
+                        <h4>🐛 Debug Information</h4>
+                        
+                        <!-- Generated Code (even on failure) -->
+                        <div x-show="debugInfo.python_code" class="debug-item">
+                            <h5>Generated Python Code:</h5>
+                            <pre><code x-text="debugInfo.python_code"></code></pre>
+                        </div>
+                        
+                        <!-- LLM Raw Response -->
+                        <div x-show="debugInfo.llm_raw_response" class="debug-item">
+                            <h5>LLM Raw Response:</h5>
+                            <pre><code x-text="debugInfo.llm_raw_response"></code></pre>
+                        </div>
+                        
+                        <!-- Execution Log -->
+                        <div x-show="debugInfo.execution_log" class="debug-item">
+                            <h5>Execution Log:</h5>
+                            <pre><code x-text="debugInfo.execution_log"></code></pre>
+                        </div>
+                        
+                        <!-- Error Details -->
+                        <div x-show="debugInfo.error_details" class="debug-item">
+                            <h5>Error Details:</h5>
+                            <pre><code x-text="debugInfo.error_details"></code></pre>
+                        </div>
+                        
+                        <!-- Validation Info -->
+                        <div x-show="debugInfo.validation_info" class="debug-item">
+                            <h5>Code Validation:</h5>
+                            <pre><code x-text="debugInfo.validation_info"></code></pre>
+                        </div>
+                    </div>
+                </div>                <!-- Success Display -->
+                <div x-show="result && !error" class="result-display">
+                    <h3>✅ Diagram Generated Successfully!</h3>
+                    
+                    <!-- Generated Code -->
+                    <div class="code-section">
+                        <h4>Generated Python Code:</h4>
+                        <pre><code x-text="result.python_code"></code></pre>
+                    </div>
+                    
+                    <!-- Debug Information for Success -->
+                    <div x-show="showDebug && result.debug_info" class="debug-section success-debug">
+                        <h4>🐛 Debug Information</h4>
+                        
+                        <!-- LLM Processing Details -->
+                        <div x-show="result.debug_info.llm_raw_response" class="debug-item">
+                            <h5>LLM Raw Response:</h5>
+                            <pre><code x-text="result.debug_info.llm_raw_response"></code></pre>
+                        </div>
+                        
+                        <!-- Code Validation Results -->
+                        <div x-show="result.debug_info.validation_info" class="debug-item">
+                            <h5>Code Validation:</h5>
+                            <pre><code x-text="result.debug_info.validation_info"></code></pre>
+                        </div>
+                        
+                        <!-- Execution Log -->
+                        <div x-show="result.debug_info.execution_log" class="debug-item">
+                            <h5>Execution Log:</h5>
+                            <pre><code x-text="result.debug_info.execution_log"></code></pre>
+                        </div>
+                        
+                        <!-- Processing Time -->
+                        <div x-show="result.debug_info.processing_time" class="debug-item">
+                            <h5>Processing Time:</h5>
+                            <p x-text="result.debug_info.processing_time"></p>
+                        </div>
+                        
+                        <!-- Model Used -->
+                        <div x-show="result.debug_info.model_used" class="debug-item">
+                            <h5>Model Used:</h5>
+                            <p x-text="result.debug_info.model_used"></p>
+                        </div>
+                    </div>
+                    
+                    <!-- Diagram Preview -->
+                    <div class="diagram-section">
+                        <h4>Generated Diagram:</h4>
+                        <div class="diagram-container">
+                            <img :src="result.diagram_url" :alt="description" />
+                        </div>
+                        <div class="diagram-actions">
+                            <a :href="result.diagram_url" download class="download-btn">📥 Download</a>
+                            <button @click="copyCode" class="copy-btn">📋 Copy Code</button>
+                            <button x-show="showDebug" @click="copyDebugInfo" class="debug-btn">🐛 Copy Debug Info</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Examples Section -->
+            <section class="examples-section">
+                <h3>💡 Example Descriptions</h3>
+                <div class="examples-grid">
+                    <div class="example-card" @click="useExample('Create a web application with load balancer, web servers connected to a MySQL database')">
+                        <h4>Web Application</h4>
+                        <p>Load balancer, web servers, and database</p>
+                    </div>
+                    
+                    <div class="example-card" @click="useExample('Design a microservices architecture on AWS with API Gateway, Lambda functions, and RDS database')">
+                        <h4>Microservices on AWS</h4>
+                        <p>API Gateway, Lambda, RDS</p>
+                    </div>
+                    
+                    <div class="example-card" @click="useExample('Show a Kubernetes deployment with ingress controller, services, and pods')">
+                        <h4>Kubernetes Architecture</h4>
+                        <p>Ingress, services, pods</p>
+                    </div>
+                    
+                    <div class="example-card" @click="useExample('Create a data pipeline with data sources, processing services, and data warehouse')">
+                        <h4>Data Pipeline</h4>
+                        <p>ETL and data warehouse</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Health Status -->
+            <section class="health-section">
+                <div class="health-status" :class="healthStatus.status">
+                    <span x-text="healthStatus.status === 'healthy' ? '🟢' : '🟡'"></span>
+                    <span x-text="healthStatus.status === 'healthy' ? 'System Healthy' : 'System Degraded'"></span>
+                    <div class="health-details">
+                        <span x-text="healthStatus.llm_connected ? '✅ LLM Connected' : '❌ LLM Disconnected'"></span>
+                        <span x-text="healthStatus.output_dir_exists ? '✅ Output Ready' : '❌ Output Not Ready'"></span>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>        function diagramApp() {
+            return {
+                description: '',
+                model: 'deepseek-coder:6.7b',
+                filename: '',
+                loading: false,
+                result: null,
+                error: null,
+                debugInfo: null,
+                showDebug: false,
+                healthStatus: { status: 'unknown', llm_connected: false, output_dir_exists: false },
+
+                async init() {
+                    await this.checkHealth();
+                },
+
+                async checkHealth() {
+                    try {
+                        const response = await fetch('/health');
+                        this.healthStatus = await response.json();
+                    } catch (e) {
+                        this.healthStatus = { status: 'error', llm_connected: false, output_dir_exists: false };
+                    }
+                },
+
+                async generateDiagram() {
+                    this.loading = true;
+                    this.error = null;
+                    this.result = null;
+                    this.debugInfo = null;
+
+                    try {
+                        const response = await fetch('/generate', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                description: this.description,
+                                model: this.model,
+                                filename: this.filename || null,
+                                include_debug: this.showDebug
+                            })
+                        });
+
+                        const data = await response.json();
+
+                        if (!response.ok) {
+                            // Handle error case with debug info
+                            this.error = data.detail || 'Generation failed';
+                            this.debugInfo = data.debug_info || null;
+                        } else {
+                            // Handle success case
+                            this.result = data;
+                        }
+                    } catch (e) {
+                        this.error = e.message;
+                        this.debugInfo = {
+                            error_details: `Network or parsing error: ${e.message}`
+                        };
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                useExample(exampleText) {
+                    this.description = exampleText;
+                    this.error = null;
+                    this.result = null;
+                    this.debugInfo = null;
+                },
+
+                async copyCode() {
+                    if (this.result && this.result.python_code) {
+                        try {
+                            await navigator.clipboard.writeText(this.result.python_code);
+                            this.showToast('Code copied to clipboard!');
+                        } catch (e) {
+                            console.error('Failed to copy code:', e);
+                        }
+                    }
+                },
+
+                async copyDebugInfo() {
+                    const debugData = this.result?.debug_info || this.debugInfo;
+                    if (debugData) {
+                        try {
+                            const debugText = JSON.stringify(debugData, null, 2);
+                            await navigator.clipboard.writeText(debugText);
+                            this.showToast('Debug info copied to clipboard!');
+                        } catch (e) {
+                            console.error('Failed to copy debug info:', e);
+                        }
+                    }
+                },
+
+                showToast(message) {
+                    // Simple toast notification - you could enhance this
+                    const toast = document.createElement('div');
+                    toast.className = 'toast';
+                    toast.textContent = message;
+                    toast.style.cssText = `
+                        position: fixed;
+                        top: 20px;
+                        right: 20px;
+                        background: #059669;
+                        color: white;
+                        padding: 12px 20px;
+                        border-radius: 8px;
+                        z-index: 1000;
+                        opacity: 0;
+                        transition: opacity 0.3s;
+                    `;
+                    document.body.appendChild(toast);
+                    
+                    // Animate in
+                    setTimeout(() => toast.style.opacity = '1', 10);
+                    
+                    // Remove after 3 seconds
+                    setTimeout(() => {
+                        toast.style.opacity = '0';
+                        setTimeout(() => document.body.removeChild(toast), 300);
+                    }, 3000);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
